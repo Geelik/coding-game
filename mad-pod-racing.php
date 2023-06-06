@@ -77,27 +77,55 @@ class Utils
     {
         error_log(var_export($message, true));
     }
+
+    /**
+     * @see https://www.reddit.com/r/gamemaker/comments/m38s5j/line_circle_intersect_function_to_share/
+     */
+    public static function findClosestIntersectPoint($cx, $cy, $r, $x1, $y1, $x2, $y2) : array
+    {
+        // Find intersect points with a line and a circle
+        // Circle origin [$cx, $cy] with radius $r
+        // Line of [$x1, $y1] to [$x2, $y2]
+
+        $cx = $x1 - $cx;
+        $cy = $y1 - $cy;
+
+        $vx = $x2 - $x1;
+        $vy = $y2 - $y1;
+        $a = $vx * $vx + $vy * $vy;
+        $b = 2 * ($vx * $cx + $vy * $cy);
+        $c = $cx * $cx + $cy * $cy - $r * $r;
+        $det = $b * $b - 4 * $a * $c;
+
+        // Line intersects circle
+        $det = sqrt($det);
+        $t1 = (-$b - $det) / (2 * $a);
+
+        return [
+            'x' => $x1 + $t1 * $vx,
+            'y' => $y1 + $t1 * $vy
+        ];
+    }
+
+    public static function findDistanceBetweenPoints($x1, $y1, $x2, $y2) : float
+    {
+        return ((($x2 - $x1) ** 2 + ($y2 - $y1) ** 2) ** 0.5);
+    }
+
 }
 
 class Game
 {
     const CHECKPOINT_RADIUS = 600;
+    const FLY_DISTANCE_APPROX = 594;
 
     const MAX_BOOST_COUNT = 1;
-    const BOOST_MARGIN = self::CHECKPOINT_RADIUS * 3;
+    const BOOST_MARGIN = self::CHECKPOINT_RADIUS * 2;
     const BOOST_MIN_DISTANCE = 1200 + self::BOOST_MARGIN;
 
-    private $hasStarted = false;
+    private $loop = 1;
     private $boostCount = 0;
     private $actions = [];
-
-    /**
-     * @return bool
-     */
-    public function isStarted() : bool
-    {
-        return $this->hasStarted;
-    }
 
     public function addAction(Action $action) : void
     {
@@ -129,18 +157,13 @@ class Game
         echo(implode(';', $output)."\n");
     }
 
-    /**
-     * @param bool $hasStarted
-     */
-    public function setHasStarted(bool $hasStarted) : void
-    {
-        $this->hasStarted = $hasStarted;
-    }
 
     public function canBoost(int $nextCheckpointDistance, int $nextCheckpointAngle) : bool
     {
         return
-            $this->boostCount < self::MAX_BOOST_COUNT
+            // empêche de booster directement car cela n'apporte pas d'avantage
+            $this->loop > 5
+            && $this->boostCount < self::MAX_BOOST_COUNT
             && $nextCheckpointDistance >= self::BOOST_MIN_DISTANCE
             && Utils::between($nextCheckpointAngle, -10, 10);
     }
@@ -155,6 +178,11 @@ class Game
         $this->boostCount++;
     }
 
+    public function incrementLoop() : void
+    {
+        $this->loop++;
+    }
+
     public function loop(
         int $x,
         int $y,
@@ -166,8 +194,28 @@ class Game
         int $opponentY
     ) : void
     {
-        Utils::log("nextCheckpointDist => $nextCheckpointDist");
-        Utils::log("nextCheckpointAngle => $nextCheckpointAngle");
+
+        ['x' => $closestX, 'y' => $closesY] = Utils::findClosestIntersectPoint(
+            $nextCheckpointX,
+            $nextCheckpointY,
+            Game::CHECKPOINT_RADIUS,
+            $x,
+            $y,
+            $nextCheckpointX,
+            $nextCheckpointY
+        );
+
+        $nextCheckpointX = round($closestX);
+        $nextCheckpointY = round($closesY);
+        $nextCheckpointDist = round(Utils::findDistanceBetweenPoints($x, $y, $nextCheckpointX, $nextCheckpointY));
+
+        /**
+         * @todo
+         * 1. Sauvegarder les point afin d'avoir le circuit complet.
+         * 2. Détecter l'arrivée au deuxième tour
+         * 3. optimiser le trajet pour perdre le moins de temps
+         */
+
 
         // Si on peut boost va pas plus loin
         if ($this->canBoost($nextCheckpointDist, $nextCheckpointAngle)) {
@@ -179,8 +227,7 @@ class Game
         // Si on tourne
         // ne met pas de vitesse et avance avec l'inertie
         if (
-            ($nextCheckpointDist < self::CHECKPOINT_RADIUS * 2 && $nextCheckpointAngle === 0)
-            || ($nextCheckpointAngle < -90 || $nextCheckpointAngle > 90)
+            ($nextCheckpointAngle < -90 || $nextCheckpointAngle > 90)
         )
         {
             $this->fly($nextCheckpointX, $nextCheckpointY, 0);
@@ -205,7 +252,7 @@ while (TRUE) {
     fscanf(STDIN, "%d %d", $opponentX, $opponentY);
 
     $game->loop($x, $y, $nextCheckpointX, $nextCheckpointY, $nextCheckpointDist, $nextCheckpointAngle, $opponentX, $opponentY);
-    $game->setHasStarted(true);
+    $game->incrementLoop();
     $game->sendActions();
 
 }
