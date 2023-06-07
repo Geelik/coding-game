@@ -66,6 +66,87 @@ class Fly extends BaseAction
     }
 }
 
+class Checkpoint {
+    /**
+     * @var int
+     */
+    private $x;
+    /**
+     * @var int
+     */
+    private $y;
+    /**
+     * @var int
+     */
+    private $index;
+    /**
+     * @var int
+     */
+    private $closestX;
+    /**
+     * @var int
+     */
+    private $closestY;
+
+    public function __construct(
+        int $x,
+        int $y,
+        int $index,
+        int $closestX,
+        int $closestY
+    )
+    {
+
+        $this->x = $x;
+        $this->y = $y;
+        $this->index = $index;
+        $this->closestX = $closestX;
+        $this->closestY = $closestY;
+    }
+
+    /**
+     * @return int
+     */
+    public function getX(): int
+    {
+        return $this->x;
+    }
+
+    /**
+     * @return int
+     */
+    public function getY(): int
+    {
+        return $this->y;
+    }
+
+    /**
+     * @return int
+     */
+    public function getIndex(): int
+    {
+        return $this->index;
+    }
+
+    /**
+     * @return int
+     */
+    public function getClosestX(): int
+    {
+        return $this->closestX;
+    }
+
+    /**
+     * @return int
+     */
+    public function getClosestY(): int
+    {
+        return $this->closestY;
+    }
+
+
+}
+
 class Utils
 {
     public static function between(int $value, int $min, int $max) : bool
@@ -123,9 +204,12 @@ class Game
     const BOOST_MARGIN = self::CHECKPOINT_RADIUS * 2;
     const BOOST_MIN_DISTANCE = 1200 + self::BOOST_MARGIN;
 
-    private $loop = 1;
-    private $boostCount = 0;
     private $actions = [];
+    private $loop = 1;
+
+    private $boostCount = 0;
+    private $checkpoints = [];
+
 
     public function addAction(Action $action) : void
     {
@@ -141,7 +225,9 @@ class Game
         usort($this->actions, function (Action $actionA, Action $actionB) {
             if ($actionA->getPriority() > $actionB->getPriority()) {
                 return -1;
-            } elseif ($actionA->getPriority() < $actionB->getPriority()) {
+            }
+
+            if ($actionA->getPriority() < $actionB->getPriority()) {
                 return 1;
             }
 
@@ -158,14 +244,12 @@ class Game
     }
 
 
-    public function canBoost(int $nextCheckpointDistance, int $nextCheckpointAngle) : bool
+    public function canBoost() : bool
     {
         return
             // empêche de booster directement car cela n'apporte pas d'avantage
             $this->loop > 5
-            && $this->boostCount < self::MAX_BOOST_COUNT
-            && $nextCheckpointDistance >= self::BOOST_MIN_DISTANCE
-            && Utils::between($nextCheckpointAngle, -10, 10);
+            && $this->boostCount < self::MAX_BOOST_COUNT;
     }
 
     public function fly(int $x, int $y, int $thrust) {
@@ -174,6 +258,7 @@ class Game
 
     public function boost(int $x, int $y)
     {
+        Utils::log('BOOOOOOOOOOOOOOSSSSSSSSSSSSSTTTTTTTTTTTT');
         $this->fly($x, $y, Fly::BOOST);
         $this->boostCount++;
     }
@@ -195,7 +280,7 @@ class Game
     ) : void
     {
 
-        ['x' => $closestX, 'y' => $closesY] = Utils::findClosestIntersectPoint(
+        ['x' => $closestX, 'y' => $closestY] = Utils::findClosestIntersectPoint(
             $nextCheckpointX,
             $nextCheckpointY,
             Game::CHECKPOINT_RADIUS,
@@ -204,38 +289,49 @@ class Game
             $nextCheckpointX,
             $nextCheckpointY
         );
+        $closestX = (int) round($closestX);
+        $closestY = (int) round($closestY);
 
-        $nextCheckpointX = round($closestX);
-        $nextCheckpointY = round($closesY);
-        $nextCheckpointDist = round(Utils::findDistanceBetweenPoints($x, $y, $nextCheckpointX, $nextCheckpointY));
+        if (!array_key_exists("{$nextCheckpointX}_{$nextCheckpointY}", $this->checkpoints)) {
+            $checkpoint = new Checkpoint(
+                $nextCheckpointX,
+                $nextCheckpointY,
+                $this->loop - 1,
+                $closestX,
+                $closestY
+            );
 
-        /**
-         * @todo
-         * 1. Sauvegarder les point afin d'avoir le circuit complet.
-         * 2. Détecter l'arrivée au deuxième tour
-         * 3. optimiser le trajet pour perdre le moins de temps
-         */
+            $this->checkpoints["{$nextCheckpointX}_{$nextCheckpointY}"] = $checkpoint;
+        }
+        else {
+            $checkpoint = $this->checkpoints["{$nextCheckpointX}_{$nextCheckpointY}"];
+        }
 
+        $closestPointDist = (int) round(Utils::findDistanceBetweenPoints(
+            $x,
+            $y,
+            $closestX,
+            $closestY
+        ));
 
-        // Si on peut boost va pas plus loin
-        if ($this->canBoost($nextCheckpointDist, $nextCheckpointAngle)) {
-            $this->boost($nextCheckpointX, $nextCheckpointY);
+        $opponentDist = Utils::findDistanceBetweenPoints($x, $y, $opponentX, $opponentY);
+        if ($this->canBoost())
+        {
+            $this->boost($closestX, $closestY);
             return;
         }
 
         // Si on se rapproche
         // Si on tourne
         // ne met pas de vitesse et avance avec l'inertie
-        if (
-            ($nextCheckpointAngle < -90 || $nextCheckpointAngle > 90)
-        )
+        if ($nextCheckpointAngle < -90 || $nextCheckpointAngle > 90)
         {
-            $this->fly($nextCheckpointX, $nextCheckpointY, 0);
+            $this->fly($closestX, $closestY, 0);
             return;
         }
 
         // Sinon à fond
-        $this->fly($nextCheckpointX, $nextCheckpointY, 100);
+        $this->fly($closestX, $closestY, 100);
     }
 }
 
