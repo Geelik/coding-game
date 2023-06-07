@@ -305,6 +305,12 @@ class Game
         }
         else {
             $checkpoint = $this->checkpoints["{$nextCheckpointX}_{$nextCheckpointY}"];
+            /**
+             * @todo
+             * Au second tour le closestPoint sera calculé entre le point central du prochain point et
+             * le closestPoint du checkpoint précédent
+             *
+             */
         }
 
         $closestPointDist = (int) round(Utils::findDistanceBetweenPoints(
