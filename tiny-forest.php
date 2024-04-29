@@ -45,8 +45,6 @@ class Cell {
     /** @var int|null  */
     private $plantedYear = null;
 
-    private $invalidForFirstSeed = false;
-
     /**
      * @param $type
      * @param $x
@@ -57,11 +55,6 @@ class Cell {
         $this->type = $type;
         $this->x = $x;
         $this->y = $y;
-    }
-
-    public function getType(): int
-    {
-        return $this->type;
     }
 
     public function getX(): int
@@ -114,10 +107,6 @@ class Cell {
 
     public function getSymbol() : string
     {
-        if ($this->isInvalidForFirstSeed() && $this->isGrass()) {
-            return 'O';
-        }
-
         switch ($this->type) {
             case self::TYPE_GRASS: {
 
@@ -132,16 +121,6 @@ class Cell {
         }
 
         throw new RuntimeException('Invalid type');
-    }
-
-    public function isInvalidForFirstSeed(): bool
-    {
-        return $this->invalidForFirstSeed;
-    }
-
-    public function setInvalidForFirstSeed(bool $invalidForFirstSeed): void
-    {
-        $this->invalidForFirstSeed = $invalidForFirstSeed;
     }
 
     public static function getTypeFromSymbol(string $symbol) : int
@@ -163,7 +142,7 @@ class Cell {
 }
 
 class Field {
-    /** @var array  */
+    /** @var array[int][int][Cell]  */
     private $cells;
     /** @var int */
     private $width;
@@ -173,6 +152,8 @@ class Field {
     private $currentYear;
     /** @var int */
     private $simulateYearCount;
+    /** @var array[int][int][Cell]  */
+    private $originalCells;
 
     /**
      * @param array $cells
@@ -187,6 +168,13 @@ class Field {
         $this->height = $height;
         $this->simulateYearCount = $simulateYearCount;
         $this->currentYear = 0;
+
+        $this->originalCells = [];
+        foreach ($this->cells as $y => $row) {
+            foreach ($row as $x => $cell) {
+                $this->originalCells[$y][$x] = clone $cell;
+            }
+        }
     }
 
     /**
@@ -226,12 +214,12 @@ class Field {
     /**
      * @return Cell[]
      */
-    public function getValidCellsForFirstSeed() : array
+    public function getGrasses() : array
     {
         return array_reduce($this->cells, static function (array $carry, array $row) {
             /** @var Cell $cell */
             foreach ($row as $cell) {
-                if ($cell->isInvalidForFirstSeed() === false) {
+                if ($cell->isGrass()) {
                     $carry[] = $cell;
                 }
             }
@@ -253,12 +241,6 @@ class Field {
         }
 
         return $this->cells[$y][$x];
-    }
-
-    public function getCenterCell() : Cell
-    {
-        $centerCellCoordinates = $this->getCenterCellCoordinates();
-        return $this->getCell($centerCellCoordinates['x'], $centerCellCoordinates['y']);
     }
 
     public function getLeftCell(Cell $cell) : ?Cell
@@ -289,164 +271,52 @@ class Field {
         return $this->getCell($x, $y);
     }
 
-    public function getOppositeCell(Cell $cell) : Cell
+    public function simulateAll() : int
     {
-        $centerCell = $this->getCenterCell();
-        if ($cell->getX() > $centerCell->getX()) {
-            $centerDistanceX = $cell->getX() - $centerCell->getX();
-            $x = $centerCell->getX() - $centerDistanceX;
-        }
-        elseif ($cell->getX() < $centerCell->getX()) {
-            $centerDistanceX = $centerCell->getX() - $cell->getX();
-            $x = $centerCell->getX() - $centerDistanceX;
-        }
-        else {
-            $x = 0;
+        $maxTreeCount = 0;
+
+        $grasses = $this->getGrasses();
+
+        foreach ($grasses as $grass) {
+            $this->resetCells();
+            $this->currentYear = 0;
+            $this->getCell($grass->getX(), $grass->getY())->plantSeed($this->currentYear);
+
+            $this->print("Simulation start for {$grass->getX()}:{$grass->getY()}");
+            $simulationTreeCount = $this->simulate();
+            $this->print("Simulation end for {$grass->getX()}:{$grass->getY()}");
+
+            Debug::log("\n");
+            Debug::log("\n");
+            if ($simulationTreeCount > $maxTreeCount) {
+                $maxTreeCount = $simulationTreeCount;
+            }
+
         }
 
-        if ($cell->getY() > $centerCell->getY()) {
-            $centerDistanceY = $cell->getY() - $centerCell->getY();
-            $y = $centerCell->getY() - $centerDistanceY;
-        }
-        elseif ($cell->getY() < $centerCell->getY()) {
-            $centerDistanceY = $centerCell->getY() - $cell->getY();
-            $y = $centerCell->getY() - $centerDistanceY;
-        }
-        else {
-            $y = 0;
-        }
-
-        return $this->getCell($x, $y);
+        return $maxTreeCount;
     }
 
-    public function getCenterCellCoordinates() : array
+
+    private function resetCells() : void
     {
-        if ($this->height % 2 > 0)
-        {
-            $y = (int) (($this->height / 2));
+        unset($this->cells);
+        foreach ($this->originalCells as $y => $row) {
+            foreach ($row as $x => $cell) {
+                $this->cells[$y][$x] = clone $cell;
+            }
         }
-        else {
-            $y = (int) $this->height / 2;
-        }
-
-        if ($this->width % 2 > 0)
-        {
-            $x = (int) (($this->width / 2));
-        }
-        else {
-            $x = (int) $this->width / 2;
-        }
-
-        return [
-            'x' => $x,
-            'y' => $y,
-        ];
     }
 
-    public function simulate() : void
+    private function simulate() : int
     {
         while ($this->currentYear <= $this->simulateYearCount) {
-            Debug::log("Simulating year {$this->currentYear}");
-            if ($this->currentYear === 0) {
-                $this->plantSeed();
-                $this->print("Seed planted");
-            }
-
             $this->growTrees();
             $this->growSeeds();
-
             $this->currentYear++;
         }
-    }
 
-    private function plantSeed() : void
-    {
-        if (count($this->getTrees()) === 0) {
-            $cell = $this->getCenterCell();
-            $cell->plantSeed($this->currentYear);
-            $this->print("Seed planted");
-            return;
-        }
-
-        if (count($this->getTrees()) === 1) {
-            $optimumDistance = 3;
-            $tree = current($this->getTrees());
-
-            $centerCell = $this->getCenterCell();
-            if ($tree->getX() > $centerCell->getX()) {
-                $x = $tree->getX() - $optimumDistance;
-            }
-            elseif ($tree->getX() < $centerCell->getX()) {
-                $x = $tree->getX() + $optimumDistance;
-            }
-            else {
-                $x = 0;
-            }
-
-            if ($tree->getY() > $centerCell->getY()) {
-                $y = $tree->getY() - $optimumDistance;
-            }
-            elseif ($tree->getY() < $centerCell->getY()) {
-                $y = $tree->getY() + $optimumDistance;
-            }
-            else {
-                $y = 0;
-            }
-
-
-            $cell = $this->getCell($x, $y);
-            if ($cell === null) {
-                throw new RuntimeException("Cannot plant seed at $x:$y");
-            }
-
-            $cell->plantSeed($this->currentYear);
-            return;
-        }
-
-        $margin = 3;
-        foreach ($this->getTrees() as $tree) {
-            $tree->setInvalidForFirstSeed(true);
-            for ($i = 1; $i < $margin; $i++) {
-                $plusX = $tree->getX() + $i;
-                $minusX = $tree->getX() - $i;
-                $plusY = $tree->getY() + $i;
-                $minusY = $tree->getY() - $i;
-
-                $samePlusCell = $this->getCell($tree->getX(),$plusY);
-                if ($samePlusCell !== null) {
-                    $samePlusCell->setInvalidForFirstSeed(true);
-                }
-                $sameMinusCell = $this->getCell($tree->getX(),$minusY);
-                if ($sameMinusCell !== null) {
-                    $sameMinusCell->setInvalidForFirstSeed(true);
-                }
-                $plusSameCell = $this->getCell($plusX,$tree->getY());
-                if ($plusSameCell !== null) {
-                    $plusSameCell->setInvalidForFirstSeed(true);
-                }
-                $minusSameCell = $this->getCell($minusX,$tree->getY());
-                if ($minusSameCell !== null) {
-                    $minusSameCell->setInvalidForFirstSeed(true);
-                }
-
-                $plusPlusCell = $this->getCell($plusX,$plusY);
-                if ($plusPlusCell !== null) {
-                    $plusPlusCell->setInvalidForFirstSeed(true);
-                }
-                $plusMinusCell = $this->getCell($plusX,$minusY);
-                if ($plusMinusCell !== null) {
-                    $plusMinusCell->setInvalidForFirstSeed(true);
-                }
-                $minusPlusCell = $this->getCell($minusX,$plusY);
-                if ($minusPlusCell !== null) {
-                    $minusPlusCell->setInvalidForFirstSeed(true);
-                }
-                $minusMinusCell = $this->getCell($minusX,$minusY);
-                if ($minusMinusCell !== null) {
-                    $minusMinusCell->setInvalidForFirstSeed(true);
-                }
-            }
-        }
+        return count($this->getTrees());
     }
 
     private function growTrees() : void
@@ -523,10 +393,7 @@ for ($i = 0; $i < $H; $i++) {
 $field = new Field($cells, $W, $H, 33);
 // Write an answer using echo(). DON'T FORGET THE TRAILING \n
 // To debug: error_log(var_export($var, true)); (equivalent to var_dump)
-$field->print("Start layout");
-$field->simulate();
-$field->print("End layout");
-$treeCount = count($field->getTrees());
+$treeCount = $field->simulateAll();
 
 echo("$treeCount\n");
 
